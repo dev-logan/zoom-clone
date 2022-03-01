@@ -14,6 +14,7 @@ let muted = false
 let cameraOff = false
 let roomName
 let myPeerConnection
+let myDataChannel
 
 async function getCameras() {
 	try {
@@ -37,7 +38,7 @@ async function getCameras() {
 async function getMedia(deviceId) {
 	const initialConstraints = {
 		audio: true,
-		video: { facintMode: 'user' },
+		video: { facingMode: 'user' },
 	}
 	const cameraConstraints = {
 		audio: true,
@@ -83,6 +84,13 @@ function handleCameraClick() {
 
 async function handleCameraChange() {
 	await getMedia(camerasSelect.value)
+	if (myPeerConnection) {
+		const videoTrack = myStream.getVideoTracks()[0]
+		const videoSender = myPeerConnection
+			.getSenders()
+			.find((sender) => sender.track.kind === 'video')
+		videoSender.replaceTrack(videoTrack)
+	}
 }
 
 muteBtn.addEventListener('click', handleMuteClick)
@@ -116,6 +124,11 @@ welcomeForm.addEventListener('submit', handleWelcomeSubmit)
 
 // Peer A
 socket.on('welcome', async () => {
+	myDataChannel = myPeerConnection.createDataChannel('chat')
+	myDataChannel.addEventListener('message', (event) =>
+		console.log(event.data)
+	)
+	console.log('made data channel')
 	const offer = await myPeerConnection.createOffer()
 	myPeerConnection.setLocalDescription(offer)
 	console.log('sent the offer')
@@ -129,6 +142,11 @@ socket.on('answer', (answer) => {
 
 // Peer B
 socket.on('offer', async (offer) => {
+	myPeerConnection.addEventListener('datachannel', (event) => {
+		myDataChannel = event.channel
+		myDataChannel.addEventListener('message', (event) =>
+		console.log(event.data))
+	})
 	console.log('received the offer')
 	myPeerConnection.setRemoteDescription(offer)
 	const answer = await myPeerConnection.createAnswer()
@@ -145,9 +163,22 @@ socket.on('ice', (ice) => {
 // RTC Code
 
 function makeConnection() {
-	myPeerConnection = new RTCPeerConnection()
+	myPeerConnection = new RTCPeerConnection({
+		iceServers: [
+			{
+				urls: [
+					'stun:stun.l.google.com:19302',
+					'stun:stun1.l.google.com:19302',
+					'stun:stun2.l.google.com:19302',
+					'stun:stun3.l.google.com:19302',
+					'stun:stun4.l.google.com:19302',
+				],
+			},
+		],
+	})
 	myPeerConnection.addEventListener('icecandidate', handleIce)
-	myPeerConnection.addEventListener('addstream', handleAddStream)
+	// myPeerConnection.addEventListener('addstream', handleAddStream)
+	myPeerConnection.addEventListener('track', handleTrack)
 	myStream
 		.getTracks()
 		.forEach((track) => myPeerConnection.addTrack(track, myStream))
@@ -158,8 +189,14 @@ function handleIce(data) {
 	socket.emit('ice', data.candidate, roomName)
 }
 
-function handleAddStream(data) {
+// function handleAddStream(data) {
+// 	console.log(data)
+// 	const peerFace = document.getElementById('peerFace')
+// 	peerFace.srcObject = data.stream
+// }
+
+function handleTrack(data) {
 	console.log(data)
 	const peerFace = document.getElementById('peerFace')
-	peerFace.srcObject = data.stream
+	peerFace.srcObject = data.streams[0]
 }
